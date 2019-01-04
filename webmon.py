@@ -20,13 +20,20 @@ class WebMon:
         else:
             if args.listtargets:
                 self.print_all_targets()
-            else:  # Run as normal
-                self.start_monitor()  # start the monitoring process
+            else:
+                if args.scan:
+                    if self.get_target_count() > 0:
+                        self.do_scan()
+                    else:
+                        print("No targets specified!\nrun webmon.py -a")
+                else:  # Run as normal
+                    self.start_monitor()  # start the monitoring process
 
     def parse_args(self):
         parser = argparse.ArgumentParser(description='Use -a to quickly add targets to the config file')
         parser.add_argument('-a', '--addtargets', action='store_true', help='Add host targets to the config file')
         parser.add_argument('-l', '--listtargets', action='store_true', help='List current target host names')
+        parser.add_argument('-s', '--scan', action='store_true', help='Run a scan of all current targets once')
         args = parser.parse_args()
 
         return args
@@ -175,20 +182,59 @@ class WebMon:
             r = requests.get(url)
         except requests.exceptions.Timeout:
             error_string = "An error occured: timeout"
-            self.write_log(host_name, error_string)
+            self.write_log(host_name, 'Error', error_string)
             print(error_string)
         except requests.exceptions.TooManyRedirects:
             error_string = "An error occured: toomanyredirects"
-            self.write_log(host_name, error_string)
+            self.write_log(host_name, 'Error', error_string)
             print(error_string)
         except requests.exceptions.RequestException as e:
-            self.write_log(host_name, e)
+            print("an exception occurred")
+            exception_args = e.args[0]
+            error_string = str(exception_args)
+            self.write_log(host_name, 'Error')
+            print("Error = " + error_string)
             print(e)
 
         if r is not None:
             status_code = r.status_code
+            self.write_log(host_name, 'Status Response', 'status_code = ' + str(status_code))
 
         print("Status code for " + host_name + " = " + str(status_code))
+
+    def do_scan(self):
+        for each_section in self.CONFIG.sections():
+
+            target_url = self.CONFIG.get(each_section, 'target_url')
+
+            interval_time = self.CONFIG.get(each_section, 'interval_time')
+
+            last_scan = self.CONFIG.get(each_section, 'last_scan')
+
+            # debug
+            print('Target URL:')
+            print(target_url)
+            print('Interval Time:')
+            print(interval_time)
+            print('Last Scan:')
+            print(last_scan)
+
+            if not self.validate_url(target_url):
+                print('Error: URL %s' % target_url + ' is not valid')
+                break  # Quit program, config must have been changed outside of program
+
+            if interval_time == '':
+                print('Error: not configured properly for %s' % target_url)
+                print('Missing interval_time')
+                break  # Quit program, config must have been changed outside of program
+
+            if last_scan == '':
+                self.start_scan(each_section, target_url)
+                self.update_config_section(each_section, target_url, interval_time, self.get_current_datetime())
+            else:
+                if int(self.get_time_diff(last_scan)) >= int(interval_time):
+                    self.start_scan(each_section, target_url)
+                    self.update_config_section(each_section, target_url, interval_time, self.get_current_datetime())
 
     def start_monitor(self):  # Start monitoring the target URL
 
@@ -198,38 +244,7 @@ class WebMon:
 
             time.sleep(5)
 
-            for each_section in self.CONFIG.sections():
-
-                target_url = self.CONFIG.get(each_section, 'target_url')
-
-                interval_time = self.CONFIG.get(each_section, 'interval_time')
-
-                last_scan = self.CONFIG.get(each_section, 'last_scan')
-
-                # debug
-                print('Target URL:')
-                print(target_url)
-                print('Interval Time:')
-                print(interval_time)
-                print('Last Scan:')
-                print(last_scan)
-
-                if not self.validate_url(target_url):
-                    print('Error: URL %s' % target_url + ' is not valid')
-                    break  # Quit program, config must have been changed outside of program
-
-                if interval_time == '':
-                    print('Error: not configured properly for %s' % target_url)
-                    print('Missing interval_time')
-                    break  # Quit program, config must have been changed outside of program
-
-                if last_scan == '':
-                    self.start_scan(each_section, target_url)
-                    self.update_config_section(each_section, target_url, interval_time, self.get_current_datetime())
-                else:
-                    if int(self.get_time_diff(last_scan)) >= int(interval_time):
-                        self.start_scan(each_section, target_url)
-                        self.update_config_section(each_section, target_url, interval_time, self.get_current_datetime())
+            self.do_scan()
 
             print('Waiting ...\n')
 
